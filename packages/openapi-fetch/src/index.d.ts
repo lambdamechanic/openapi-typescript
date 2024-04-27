@@ -15,6 +15,8 @@ import type {
 export interface ClientOptions extends Omit<RequestInit, "headers"> {
   /** set the common root URL for all API requests */
   baseUrl?: string;
+  /** custom dispatcher */
+  dispatcher?: unknown;
   /** custom fetch (defaults to globalThis.fetch) */
   fetch?: (request: Request) => ReturnType<typeof fetch>;
   /** global querySerializer */
