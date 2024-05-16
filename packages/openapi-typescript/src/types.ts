@@ -616,7 +616,9 @@ export interface OAuthFlowObject extends Extensable {
  * [4.8.30] Security Requirements Object
  * Lists the required security schemes to execute this operation. The name used for each property MUST correspond to a security scheme declared in the Security Schemes under the Components Object.
  */
-export type SecurityRequirementObject = Record<keyof ComponentsObject["securitySchemes"], string[]>;
+export type SecurityRequirementObject = {
+  [P in keyof ComponentsObject["securitySchemes"]]?: string[];
+};
 
 export interface OpenAPITSOptions {
   /** Treat all objects as if they have `additionalProperties: true` by default (default: false) */
@@ -647,6 +649,8 @@ export interface OpenAPITSOptions {
   exportType?: boolean;
   /** Export true TypeScript enums instead of unions */
   enum?: boolean;
+  /** Export union values as arrays */
+  enumValues?: boolean;
   /** (optional) Substitute path parameter names with their respective types */
   pathParamsAsTypes?: boolean;
   /** Treat all objects as if they have \`required\` set to all properties by default (default: false) */
@@ -671,6 +675,7 @@ export interface GlobalContext {
   };
   emptyObjectsUnknown: boolean;
   enum: boolean;
+  enumValues: boolean;
   excludeDeprecated: boolean;
   exportType: boolean;
   immutable: boolean;

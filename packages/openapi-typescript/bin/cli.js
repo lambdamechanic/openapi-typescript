@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-import { loadConfig, findConfig, createConfig } from "@redocly/openapi-core";
+import { createConfig, findConfig, loadConfig } from "@redocly/openapi-core";
 import fs from "node:fs";
 import path from "node:path";
 import parser from "yargs-parser";
-import openapiTS, { astToString, c, COMMENT_HEADER, error, formatTime, warn } from "../dist/index.js";
+import openapiTS, { COMMENT_HEADER, astToString, c, error, formatTime, warn } from "../dist/index.js";
 
 const HELP = `Usage
   $ openapi-typescript [input] [options]
@@ -12,9 +12,10 @@ const HELP = `Usage
 Options
   --help                     Display this
   --version                  Display the version
-  --redoc [path], -c         Specify path to Redocly config (default: redocly.yaml)
+  --redocly [path], -c       Specify path to Redocly config (default: redocly.yaml)
   --output, -o               Specify output file (if not specified in redocly.yaml)
   --enum                     Export true TS enums instead of unions
+  --enum-values              Export enum values as arrays
   --export-type, -t          Export top-level \`type\` instead of \`interface\`
   --immutable                Generate readonly types
   --additional-properties    Treat schema objects as if \`additionalProperties: true\` is set
@@ -48,6 +49,9 @@ if (args.includes("--support-array-length")) {
 if (args.includes("-it")) {
   errorAndExit(`The -it alias has been deprecated. Use "--immutable-types" instead.`);
 }
+if (args.includes("--redoc")) {
+  errorAndExit(`The --redoc config flag has been renamed to "--redocly" (or -c as shorthand).`);
+}
 
 const flags = parser(args, {
   boolean: [
@@ -59,15 +63,16 @@ const flags = parser(args, {
     "propertiesRequiredByDefault",
     "emptyObjectsUnknown",
     "enum",
+    "enumValues",
     "excludeDeprecated",
     "exportType",
     "help",
     "immutable",
     "pathParamsAsTypes",
   ],
-  string: ["output", "redoc"],
+  string: ["output", "redocly"],
   alias: {
-    redoc: ["c"],
+    redocly: ["c"],
     exportType: ["t"],
     output: ["o"],
   },
@@ -75,9 +80,9 @@ const flags = parser(args, {
 
 /**
  * @param {string | URL} schema
- * @param {@type import('@redocly/openapi-core').Config} redoc
+ * @param {@type import('@redocly/openapi-core').Config} redocly
  */
-async function generateSchema(schema, { redoc, silent = false }) {
+async function generateSchema(schema, { redocly, silent = false }) {
   return `${COMMENT_HEADER}${astToString(
     await openapiTS(schema, {
       additionalProperties: flags.additionalProperties,
@@ -88,11 +93,12 @@ async function generateSchema(schema, { redoc, silent = false }) {
       defaultNonNullable: flags.defaultNonNullable,
       emptyObjectsUnknown: flags.emptyObjectsUnknown,
       enum: flags.enum,
+      enumValues: flags.enumValues,
       excludeDeprecated: flags.excludeDeprecated,
       exportType: flags.exportType,
       immutable: flags.immutable,
       pathParamsAsTypes: flags.pathParamsAsTypes,
-      redoc,
+      redocly,
       silent,
     }),
   )}`;
@@ -129,39 +135,32 @@ async function main() {
   const input = flags._[0];
 
   // load Redocly config
-  const maybeRedoc = findConfig(flags.redoc ? path.dirname(flags.redoc) : undefined);
-  const redoc = maybeRedoc
+  const maybeRedoc = findConfig(flags.redocly ? path.dirname(flags.redocly) : undefined);
+  const redocly = maybeRedoc
     ? await loadConfig({ configPath: maybeRedoc })
     : await createConfig({}, { extends: ["minimal"] });
 
   // handle Redoc APIs
-  const hasRedoclyApis = Object.keys(redoc?.apis ?? {}).length > 0;
+  const hasRedoclyApis = Object.keys(redocly?.apis ?? {}).length > 0;
   if (hasRedoclyApis) {
     if (input) {
       warn("APIs are specified both in Redocly Config and CLI argument. Only using Redocly config.");
     }
     await Promise.all(
-      Object.entries(redoc.apis).map(async ([name, api]) => {
+      Object.entries(redocly.apis).map(async ([name, api]) => {
         let configRoot = CWD;
-        if (redoc.configFile) {
+        if (redocly.configFile) {
           // note: this will be absolute if --redoc is passed; otherwise, relative
-          configRoot = path.isAbsolute(redoc.configFile)
-            ? new URL(`file://${redoc.configFile}`)
-            : new URL(redoc.configFile, `file://${process.cwd()}/`);
+          configRoot = path.isAbsolute(redocly.configFile)
+            ? new URL(`file://${redocly.configFile}`)
+            : new URL(redocly.configFile, `file://${process.cwd()}/`);
         }
         if (!api[REDOC_CONFIG_KEY]?.output) {
-          // TODO: remove in stable v7
-          if (api["openapi-ts"]) {
-            errorAndExit(`Please rename "openapi-ts" to "x-openapi-ts" in your Redoc config.`);
-          }
-
           errorAndExit(
             `API ${name} is missing an \`${REDOC_CONFIG_KEY}.output\` key. See https://openapi-ts.pages.dev/cli/#multiple-schemas.`,
           );
         }
-        const result = await generateSchema(new URL(api.root, configRoot), {
-          redoc, // TODO: merge API overrides better?
-        });
+        const result = await generateSchema(new URL(api.root, configRoot), { redocly });
         const outFile = new URL(api[REDOC_CONFIG_KEY].output, configRoot);
         fs.mkdirSync(new URL(".", outFile), { recursive: true });
         fs.writeFileSync(outFile, result, "utf8");
@@ -173,7 +172,7 @@ async function main() {
   // handle stdin
   else if (!input) {
     const result = await generateSchema(process.stdin, {
-      redoc,
+      redocly,
       silent: outputType === OUTPUT_STDOUT,
     });
     if (outputType === OUTPUT_STDOUT) {
@@ -196,7 +195,7 @@ async function main() {
       );
     }
     const result = await generateSchema(new URL(input, CWD), {
-      redoc,
+      redocly,
       silent: outputType === OUTPUT_STDOUT,
     });
     if (outputType === OUTPUT_STDOUT) {

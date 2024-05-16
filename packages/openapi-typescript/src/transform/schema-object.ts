@@ -11,6 +11,7 @@ import {
   UNKNOWN,
   addJSDocComment,
   oapiRef,
+  tsArrayLiteralExpression,
   tsEnum,
   tsIntersection,
   tsIsPrimitive,
@@ -114,7 +115,34 @@ export function transformSchemaObjectWithComposition(
       options.ctx.injectFooter.push(enumType);
       return ts.factory.createTypeReferenceNode(enumType.name);
     }
-    return tsUnion(schemaObject.enum.map(tsLiteral));
+    const enumType = schemaObject.enum.map(tsLiteral);
+    if ((Array.isArray(schemaObject.type) && schemaObject.type.includes("null")) || schemaObject.nullable) {
+      enumType.push(NULL);
+    }
+
+    const unionType = tsUnion(enumType);
+
+    // hoist array with valid enum values to top level if string/number enum and option is enabled
+    if (options.ctx.enumValues && schemaObject.enum.every((v) => typeof v === "string" || typeof v === "number")) {
+      let enumValuesVariableName = parseRef(options.path ?? "").pointer.join("/");
+      // allow #/components/schemas to have simpler names
+      enumValuesVariableName = enumValuesVariableName.replace("components/schemas", "");
+      enumValuesVariableName = `${enumValuesVariableName}Values`;
+
+      const enumValuesArray = tsArrayLiteralExpression(
+        enumValuesVariableName,
+        oapiRef(options.path ?? ""),
+        schemaObject.enum as (string | number)[],
+        {
+          export: true,
+          readonly: true,
+        },
+      );
+
+      options.ctx.injectFooter.push(enumValuesArray);
+    }
+
+    return unionType;
   }
 
   /**
@@ -323,9 +351,14 @@ function transformSchemaObjectCore(schemaObject: SchemaObject, options: Transfor
         }
       }
 
-      return ts.isTupleTypeNode(itemType) || ts.isArrayTypeNode(itemType)
-        ? itemType
-        : ts.factory.createArrayTypeNode(itemType); // wrap itemType in array type, but only if not a tuple or array already
+      const finalType =
+        ts.isTupleTypeNode(itemType) || ts.isArrayTypeNode(itemType)
+          ? itemType
+          : ts.factory.createArrayTypeNode(itemType); // wrap itemType in array type, but only if not a tuple or array already
+
+      return options.ctx.immutable
+        ? ts.factory.createTypeOperatorNode(ts.SyntaxKind.ReadonlyKeyword, finalType)
+        : finalType;
     }
 
     // polymorphic, or 3.1 nullable
